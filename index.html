@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mini SOC Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root {
+  --bg: #0b1220;
+  --panel: #111827;
+  --border: #1f2937;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #38bdf8;
+  --warning: #facc15;
+  --danger: #ef4444;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+header {
+  padding: 16px 28px;
+  background: #020617;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.3rem;
+  color: var(--accent);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  padding: 14px;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.card h3 {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.big {
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--warning);
+}
+
+.span-2 { grid-column: span 2; }
+
+canvas { height: 240px !important; }
+
+footer {
+  padding: 10px 28px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+</style>
+</head>
+
+<body>
+
+<header>🛡️ Mini SOC – Security Monitoring</header>
+
+<div class="grid">
+
+  <!-- KPI -->
+  <div class="card"><h3>Alerts (24h)</h3><div class="big" id="total">0</div></div>
+  <div class="card"><h3>Critical Alerts</h3><div class="big" id="critical">0</div></div>
+  <div class="card"><h3>Top Attacker IP</h3><div class="big" id="attacker">-</div></div>
+  <div class="card"><h3>Alert (All Time)</h3><div class="big" id="host">-</div></div>
+
+  <!-- TIMELINE -->
+  <div class="card span-2">
+    <h3>Alerts Timeline (Last 24 Hours)</h3>
+    <canvas id="timeline"></canvas>
+  </div>
+
+  <!-- SEVERITY -->
+  <div class="card span-2">
+    <h3>Severity Distribution</h3>
+    <canvas id="severity"></canvas>
+  </div>
+
+  <!-- ATTACKER -->
+  <div class="card span-2">
+    <h3>Top Attacker IP</h3>
+    <canvas id="attackers"></canvas>
+  </div>
+
+  <!-- MITRE -->
+  <div class="card span-2">
+    <h3>MITRE ATT&CK Techniques</h3>
+    <canvas id="mitre"></canvas>
+  </div>
+
+</div>
+
+<footer id="status">🟢 Connecting…</footer>
+
+<script>
+let charts = {};
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function draw(id, type, labels, data) {
+  charts[id]?.destroy();
+  charts[id] = new Chart(document.getElementById(id), {
+    type,
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: [
+          "#38bdf8", "#22c55e", "#facc15",
+          "#f97316", "#ef4444", "#a855f7"
+        ]
+      }]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#9ca3af" } } },
+      scales: type === "bar" ? {
+        x: { ticks: { color: "#9ca3af" } },
+        y: { ticks: { color: "#9ca3af" } }
+      } : {}
+    }
+  });
+}
+
+async function load() {
+  try {
+    const [
+      total,
+      critical,
+      timeline,
+      severity,
+      attackers,
+      mitre,
+      hosts
+    ] = await Promise.all([
+      fetch("/api/alerts/total").then(r => r.json()),
+      fetch("/api/alerts/critical").then(r => r.json()),
+      fetch("/api/alerts/timeline").then(r => r.json()),
+      fetch("/api/alerts/severity").then(r => r.json()),
+      fetch("/api/threats/top-attackers").then(r => r.json()),
+      fetch("/api/threats/mitre").then(r => r.json()),
+      fetch("/api/assets/total").then(r => r.json())
+    ]);
+
+    document.getElementById("total").innerText = total.total;
+    document.getElementById("critical").innerText = critical.critical;
+    document.getElementById("attacker").innerText = attackers[0]?.key || "-";
+    document.getElementById("host").innerText = hosts[0]?.key || "-";
+
+    draw(
+      "timeline",
+      "bar",
+      timeline.map(t => formatTime(t.key_as_string)),
+      timeline.map(t => t.doc_count)
+    );
+
+    draw(
+      "severity",
+      "pie",
+      severity.map(s => "Level " + s.key),
+      severity.map(s => s.doc_count)
+    );
+
+    draw(
+      "attackers",
+      "bar",
+      attackers.map(a => a.key),
+      attackers.map(a => a.doc_count)
+    );
+
+    draw(
+      "mitre",
+      "pie",
+      mitre.map(m => m.key || "Unknown"),
+      mitre.map(m => m.doc_count)
+    );
+
+    document.getElementById("status").innerText = "🟢 Wazuh Connected";
+  } catch (e) {
+    document.getElementById("status").innerText = "🔴 Wazuh Disconnected";
+  }
+}
+
+load();
+setInterval(load, 15000);
+</script>
+
+</body>
+</html>
